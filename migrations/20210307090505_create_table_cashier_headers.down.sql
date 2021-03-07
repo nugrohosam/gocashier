@@ -1,0 +1,1 @@
+DROP TABLE IF EXISTS cashier_headers

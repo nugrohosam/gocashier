@@ -1,11 +1,13 @@
 package main
 
 import (
-	"bufio"
+	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	helpers "github.com/nugrohosam/gocashier/helpers"
 	database "github.com/nugrohosam/gocashier/services/databases"
 	grpcConn "github.com/nugrohosam/gocashier/services/grpc"
 	httpConn "github.com/nugrohosam/gocashier/services/http"
@@ -14,7 +16,23 @@ import (
 )
 
 func main() {
-	loadConfigFile()
+
+	envRootPath := flag.String("env-root-path", "none", "--")
+	serviceUse := flag.String("service", "none", "--")
+
+	flag.Parse()
+
+	if *envRootPath == "none" {
+		fmt.Println("flag [--env-root-path=?] must be spellied")
+		return
+	}
+
+	if !helpers.InArray(*serviceUse, []string{"http", "grpc"}) || *serviceUse == "none" {
+		fmt.Println("flag [--service=?] must be spellied in (http or grpc)")
+		return
+	}
+
+	loadConfigFile(*envRootPath)
 
 	infrastructure.PrepareSentry()
 
@@ -22,23 +40,15 @@ func main() {
 		panic(err)
 	}
 
-	runGrpc := func() {
+	if *serviceUse == "grpc" {
 		if err := grpcConn.Serve(); err != nil {
 			panic(err)
 		}
-	}
-
-	runHTTP := func() {
+	} else if *serviceUse == "http" {
 		if err := httpConn.Serve(); err != nil {
 			panic(err)
 		}
 	}
-
-	go runGrpc()
-	go runHTTP()
-
-	reader := bufio.NewReader(os.Stdin)
-	reader.ReadString('\n')
 }
 
 func initiateRedisCache() {
@@ -55,21 +65,20 @@ func initiateRedisCache() {
 	infrastructure.InitiateRedisCache(redisHostsCache)
 }
 
-func loadConfigFile() {
-	viper.SetConfigType("yaml")
+func loadConfigFile(envRootPath string) {
 
+	viper.SetConfigType("yaml")
 	viper.SetConfigName(".env")
-	viper.AddConfigPath("./")
+	viper.AddConfigPath(envRootPath)
 	if err := viper.ReadInConfig(); err != nil {
 		panic(err)
 	}
 
-	// Load all files in config folders
 	var files []string
-
 	configFolderName := "config"
-	root := "./" + configFolderName
-	if err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+	rootPathConfig := helpers.SetPath(envRootPath, configFolderName)
+
+	if err := filepath.Walk(rootPathConfig, func(path string, info os.FileInfo, err error) error {
 		if info.Name() != configFolderName {
 			files = append(files, info.Name())
 		}
@@ -84,7 +93,7 @@ func loadConfigFile() {
 		nameConfig = strings.ReplaceAll(file, ".yaml", "")
 
 		viper.SetConfigName(nameConfig)
-		viper.AddConfigPath(root)
+		viper.AddConfigPath(rootPathConfig)
 
 		if err := viper.MergeInConfig(); err != nil {
 			panic(err)
