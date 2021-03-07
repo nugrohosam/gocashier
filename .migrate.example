@@ -1,0 +1,102 @@
+package main
+
+import (
+	"flag"
+	"fmt"
+	"strconv"
+
+	"github.com/spf13/viper"
+
+	"database/sql"
+
+	_ "github.com/go-sql-driver/mysql"
+	"github.com/golang-migrate/migrate/v4"
+	"github.com/golang-migrate/migrate/v4/database/mysql"
+	_ "github.com/golang-migrate/migrate/v4/source/file"
+)
+
+func main() {
+	state := flag.String("state", "none", "-")
+	stage := flag.String("stage", "dev", "-")
+	howManyStep := flag.String("howmanystep", "none", "-")
+
+	flag.Parse()
+
+	if *stage == "none" {
+		fmt.Println("flag [-stage=?] must be spellied")
+		return
+	}
+
+	var step int64
+	if *state == "none" {
+		panic("Stop!!! state must be spellied")
+	} else if *state == "down" {
+		if *howManyStep == "none" {
+			panic("Stop!!! howmanystep must be spellied more than 0")
+		} else {
+			var err error
+			step, err = strconv.ParseInt(*howManyStep, 0, 32)
+			if step == 0 || err != nil {
+				panic("Stop!!! define howmanystep must be spellied more than 0")
+			}
+		}
+	}
+
+	// initial call to envinronment variable
+	if *stage == "prod" {
+		viper.SetConfigFile(".env.prod.yaml")
+	} else if *stage == "test" {
+		viper.SetConfigFile(".env.test.yaml")
+	} else {
+		viper.SetConfigFile(".env.yaml")
+	}
+
+	if err := viper.ReadInConfig(); err != nil {
+		panic(err)
+	}
+
+	dbUsername := viper.GetString("database.username")
+	dbPassword := viper.GetString("database.password")
+	dbHost := viper.GetString("database.host")
+	dbPort := viper.GetString("database.port")
+	dbName := viper.GetString("database.name")
+
+	urlConn := dbUsername + ":" + dbPassword + "@tcp(" + dbHost + ":" + dbPort + ")/" + dbName + "?multiStatements=true"
+
+	db, errConn := sql.Open("mysql", urlConn)
+	if errConn != nil {
+		fmt.Println(errConn)
+		return
+	}
+
+	driver, errMysql := mysql.WithInstance(db, &mysql.Config{})
+	if errMysql != nil {
+		fmt.Println(errMysql)
+		return
+	}
+
+	m, errInstance := migrate.NewWithDatabaseInstance(
+		"file://migrations",
+		"mysql",
+		driver,
+	)
+
+	if errInstance != nil {
+		fmt.Println(errInstance)
+		return
+	}
+
+	if *state == "up" {
+		if err := m.Up(); err != nil {
+			fmt.Println(err, "when up")
+			return
+		}
+		fmt.Println("Migration", *state, "complete")
+	} else if *state == "down" {
+		m.Steps((int)(-step))
+		fmt.Println("Migration", *state, "complete", *howManyStep, "step")
+	} else {
+		fmt.Println("State is not define right")
+	}
+
+}
